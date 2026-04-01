@@ -12,9 +12,9 @@ Please follow the local setup and run instructions in the [README](./README.md).
 
 ## Pull request guidelines
 
-When opening a PR, please include what changed, why the change is needed, screenshots / recordings for UI changes.
+When opening a PR, please include what changed, why the change is needed, screenshots / recordings for UI changes (if applicable).
 Please also link the related issue when applicable (for example: Closes #545)
 
 ## Issue guidelines
 
-Please follow the bug report/issue request template.
+Please follow the bug report/feature request template.
