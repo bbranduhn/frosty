@@ -171,6 +171,21 @@ abstract class ChatStoreBase with Store {
     revealedMessageIds.add(id);
   }
 
+  // ← ADD THIS BLOCK
+  final highlightedUsers = ObservableSet<String>();
+
+  @action
+  void toggleHighlight(String username) {
+    if (highlightedUsers.contains(username)) {
+      highlightedUsers.remove(username);
+    } else {
+      highlightedUsers.add(username);
+    }
+  }
+
+  bool isHighlighted(String username) => highlightedUsers.contains(username);
+  // ← END ADD
+
   /// Timer used for dismissing the notification.
   Timer? _notificationTimer;
 

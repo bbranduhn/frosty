@@ -279,6 +279,8 @@ class ChatMessage extends StatelessWidget {
 
             // If user is being mentioned in the message, highlight it red.
             if (ircMessage.mention == true) highlightColor = context.colorScheme.error;
+            if (chatStore.highlightedUsers.contains(ircMessage.user)) highlightColor = context.colorScheme.primary;
+
 
             if (messageHeader != null) {
               renderMessage = Column(
