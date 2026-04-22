@@ -8,6 +8,8 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 class ReleaseNotes extends StatefulWidget {
+  static const routeName = 'ReleaseNotes';
+
   const ReleaseNotes({super.key});
 
   @override
@@ -72,9 +74,9 @@ class _ReleaseNotesState extends State<ReleaseNotes> {
               ),
               child: Markdown(
                 padding: EdgeInsets.fromLTRB(
-                  16,
+                  16 + MediaQuery.of(context).padding.left,
                   MediaQuery.of(context).padding.top + kToolbarHeight,
-                  16,
+                  16 + MediaQuery.of(context).padding.right,
                   16,
                 ),
                 controller: _scrollController,

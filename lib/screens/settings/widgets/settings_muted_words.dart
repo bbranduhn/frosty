@@ -3,7 +3,6 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:frosty/screens/settings/stores/settings_store.dart';
 import 'package:frosty/utils/modal_bottom_sheet.dart';
 import 'package:frosty/widgets/alert_message.dart';
-import 'package:frosty/widgets/frosty_dialog.dart';
 import 'package:frosty/widgets/frosty_scrollbar.dart';
 
 class SettingsMutedWords extends StatefulWidget {
@@ -97,30 +96,25 @@ class _SettingsMutedWordsState extends State<SettingsMutedWords> {
                               settingsStore.mutedWords.elementAt(index),
                             ),
                             trailing: IconButton(
-                              icon: const Icon(Icons.delete),
+                              icon: const Icon(
+                                Icons.delete_outline_rounded,
+                              ),
                               onPressed: () {
-                                // show confirmation dialog before deleting a keyword
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => FrostyDialog(
-                                    title: 'Delete keyword',
-                                    message:
-                                        'Are you sure you want to delete this keyword?',
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () {
-                                          Navigator.of(context).pop();
-                                        },
-                                        child: const Text('Cancel'),
-                                      ),
-                                      FilledButton(
-                                        onPressed: () {
-                                          removeMutedWord(index);
-                                          Navigator.of(context).pop();
-                                        },
-                                        child: const Text('Delete'),
-                                      ),
-                                    ],
+                                final word =
+                                    settingsStore.mutedWords.elementAt(index);
+                                removeMutedWord(index);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text("Removed '$word'"),
+                                    action: SnackBarAction(
+                                      label: 'Undo',
+                                      onPressed: () {
+                                        settingsStore.mutedWords = [
+                                          ...settingsStore.mutedWords,
+                                          word,
+                                        ];
+                                      },
+                                    ),
                                   ),
                                 );
                               },

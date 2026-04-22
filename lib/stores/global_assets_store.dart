@@ -1,3 +1,4 @@
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:frosty/apis/bttv_api.dart';
 import 'package:frosty/apis/ffz_api.dart';
@@ -166,10 +167,13 @@ abstract class GlobalAssetsStoreBase with Store {
     required bool showFFZEmotes,
     required bool showFFZBadges,
   }) async {
-    // Error handler for emotes
-    List<Emote> onEmoteError(dynamic error) {
-      debugPrint('GlobalAssetsStore emote error: $error');
-      return <Emote>[];
+    void onAssetError(dynamic error, StackTrace stack) {
+      debugPrint('GlobalAssetsStore error: $error');
+      FirebaseCrashlytics.instance.recordError(
+        error,
+        stack,
+        reason: 'Global asset fetch failed',
+      );
     }
 
     await Future.wait([
@@ -178,8 +182,9 @@ abstract class GlobalAssetsStoreBase with Store {
         twitchApi
             .getEmotesGlobal()
             .then((emotes) => _twitchGlobalEmotes = emotes)
-            .catchError((e) {
-              _twitchGlobalEmotes = onEmoteError(e);
+            .catchError((e, StackTrace stack) {
+              onAssetError(e, stack);
+              _twitchGlobalEmotes = <Emote>[];
               return _twitchGlobalEmotes;
             }),
       // 7TV global emotes
@@ -187,8 +192,9 @@ abstract class GlobalAssetsStoreBase with Store {
         sevenTVApi
             .getEmotesGlobal()
             .then((emotes) => _sevenTVGlobalEmotes = emotes)
-            .catchError((e) {
-              _sevenTVGlobalEmotes = onEmoteError(e);
+            .catchError((e, StackTrace stack) {
+              onAssetError(e, stack);
+              _sevenTVGlobalEmotes = <Emote>[];
               return _sevenTVGlobalEmotes;
             }),
       // BTTV global emotes
@@ -196,8 +202,9 @@ abstract class GlobalAssetsStoreBase with Store {
         bttvApi
             .getEmotesGlobal()
             .then((emotes) => _bttvGlobalEmotes = emotes)
-            .catchError((e) {
-              _bttvGlobalEmotes = onEmoteError(e);
+            .catchError((e, StackTrace stack) {
+              onAssetError(e, stack);
+              _bttvGlobalEmotes = <Emote>[];
               return _bttvGlobalEmotes;
             }),
       // FFZ global emotes
@@ -205,8 +212,9 @@ abstract class GlobalAssetsStoreBase with Store {
         ffzApi
             .getEmotesGlobal()
             .then((emotes) => _ffzGlobalEmotes = emotes)
-            .catchError((e) {
-              _ffzGlobalEmotes = onEmoteError(e);
+            .catchError((e, StackTrace stack) {
+              onAssetError(e, stack);
+              _ffzGlobalEmotes = <Emote>[];
               return _ffzGlobalEmotes;
             }),
 
@@ -215,8 +223,8 @@ abstract class GlobalAssetsStoreBase with Store {
         twitchApi
             .getBadgesGlobal()
             .then((badges) => _twitchGlobalBadges = badges)
-            .catchError((e) {
-              debugPrint('GlobalAssetsStore badge error: $e');
+            .catchError((e, StackTrace stack) {
+              onAssetError(e, stack);
               _twitchGlobalBadges = <String, ChatBadge>{};
               return _twitchGlobalBadges;
             }),
@@ -224,8 +232,9 @@ abstract class GlobalAssetsStoreBase with Store {
       if (showBTTVBadges)
         bttvApi.getBadges().then((badges) => _bttvBadges = badges).catchError((
           e,
+          StackTrace stack,
         ) {
-          debugPrint('GlobalAssetsStore badge error: $e');
+          onAssetError(e, stack);
           _bttvBadges = <String, ChatBadge>{};
           return _bttvBadges;
         }),
@@ -233,8 +242,9 @@ abstract class GlobalAssetsStoreBase with Store {
       if (showFFZBadges)
         ffzApi.getBadges().then((badges) => _ffzBadges = badges).catchError((
           e,
+          StackTrace stack,
         ) {
-          debugPrint('GlobalAssetsStore badge error: $e');
+          onAssetError(e, stack);
           _ffzBadges = <String, List<ChatBadge>>{};
           return _ffzBadges;
         }),

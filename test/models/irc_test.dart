@@ -416,7 +416,8 @@ void main() {
       expect(notice.command, Command.notice);
       expect(notice.message, 'Test notice');
       expect(notice.raw, isEmpty);
-      expect(notice.tags, isEmpty);
+      expect(notice.tags, contains('tmi-sent-ts'));
+      expect(notice.tags.length, 1);
     });
 
     test('creates notice with action callback', () {

@@ -44,7 +44,10 @@ class _HomeState extends State<Home> {
 
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => const ReleaseNotes()),
+        MaterialPageRoute(
+          settings: const RouteSettings(name: ReleaseNotes.routeName),
+          builder: (context) => const ReleaseNotes(),
+        ),
       ).then((_) => prefs.setString('last_shown_version', currentVersion));
     }
   }
@@ -52,13 +55,12 @@ class _HomeState extends State<Home> {
   @override
   void initState() {
     super.initState();
+    SystemChrome.setPreferredOrientations([]);
     checkAndShowReleaseNotes();
   }
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setPreferredOrientations([]);
-
     final theme = Theme.of(context);
 
     return GestureDetector(
@@ -122,6 +124,7 @@ class _HomeState extends State<Home> {
                     onPressed: () => Navigator.push(
                       context,
                       MaterialPageRoute(
+                        settings: const RouteSettings(name: Settings.routeName),
                         builder: (context) => Settings(
                           settingsStore: context.read<SettingsStore>(),
                         ),
@@ -208,7 +211,12 @@ class _HomeState extends State<Home> {
                   ),
                 ],
                 selectedIndex: _homeStore.selectedIndex,
-                onDestinationSelected: _homeStore.handleTap,
+                onDestinationSelected: (index) {
+                  if (index != _homeStore.selectedIndex) {
+                    HapticFeedback.selectionClick();
+                  }
+                  _homeStore.handleTap(index);
+                },
               ),
             ),
           ),

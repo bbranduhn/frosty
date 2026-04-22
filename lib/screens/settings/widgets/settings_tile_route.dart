@@ -24,6 +24,7 @@ class SettingsTileRoute extends StatelessWidget {
       trailing: const Icon(Icons.chevron_right_rounded),
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
+          settings: RouteSettings(name: title),
           builder: (context) => useScaffold
               ? _BlurredSettingsPage(title: title, child: child)
               : child,
@@ -69,10 +70,14 @@ class _BlurredSettingsPage extends StatelessWidget {
         children: [
           // Main scrollable content
           Positioned.fill(
-            child: MediaQuery.removePadding(
-              context: context,
-              removeTop: true,
-              child: child,
+            child: SafeArea(
+              top: false,
+              bottom: false,
+              child: MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                child: child,
+              ),
             ),
           ),
           // Blurred app bar overlay - positioned AFTER content so it renders on top

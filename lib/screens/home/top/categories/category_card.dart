@@ -29,6 +29,7 @@ class CategoryCard extends StatelessWidget {
           ? () => Navigator.push(
               context,
               MaterialPageRoute(
+                settings: const RouteSettings(name: CategoryStreams.routeName),
                 builder: (context) => CategoryStreams(categoryId: category.id),
               ),
             )

@@ -17,6 +17,8 @@ import 'package:simple_icons/simple_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class Settings extends StatelessWidget {
+  static const routeName = 'Settings';
+
   final SettingsStore settingsStore;
 
   const Settings({super.key, required this.settingsStore});
@@ -75,11 +77,14 @@ class Settings extends StatelessWidget {
       body: Stack(
         children: [
           // Main scrollable content
-          FrostyScrollbar(
-            padding: EdgeInsets.only(
-              top: MediaQuery.of(context).padding.top + kToolbarHeight,
-            ),
-            child: CustomScrollView(
+          SafeArea(
+            top: false,
+            bottom: false,
+            child: FrostyScrollbar(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + kToolbarHeight,
+              ),
+              child: CustomScrollView(
               slivers: [
                 SliverPadding(
                   padding: EdgeInsets.only(
@@ -198,6 +203,7 @@ class Settings extends StatelessWidget {
                 ),
               ],
             ),
+          ),
           ),
           // Blurred app bar overlay
           Positioned(

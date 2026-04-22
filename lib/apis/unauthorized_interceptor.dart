@@ -22,8 +22,9 @@ class UnauthorizedInterceptor extends Interceptor {
         return;
       }
 
-      // For other requests, show login dialog and don't propagate
+      // For other requests, show login dialog and reject so the Future completes
       _showLoginDialog();
+      handler.reject(err);
       return;
     }
 

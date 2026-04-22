@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// A custom-styled adaptive [Slider].
-class SettingsListSlider extends StatelessWidget {
+class SettingsListSlider extends StatefulWidget {
   final String title;
   final String trailing;
   final String? subtitle;
@@ -24,14 +25,36 @@ class SettingsListSlider extends StatelessWidget {
   });
 
   @override
+  State<SettingsListSlider> createState() => _SettingsListSliderState();
+}
+
+class _SettingsListSliderState extends State<SettingsListSlider> {
+  int? _previousStep;
+
+  void _handleChanged(double newValue) {
+    if (widget.divisions != null) {
+      final step =
+          ((newValue - widget.min) /
+                  (widget.max - widget.min) *
+                  widget.divisions!)
+              .round();
+      if (_previousStep != null && step != _previousStep) {
+        HapticFeedback.selectionClick();
+      }
+      _previousStep = step;
+    }
+    widget.onChanged?.call(newValue);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListTile(
       title: Row(
         children: [
-          Text(title),
+          Text(widget.title),
           const Spacer(),
           Text(
-            trailing,
+            widget.trailing,
             style: const TextStyle(
               fontFeatures: [FontFeature.tabularFigures()],
             ),
@@ -45,13 +68,14 @@ class SettingsListSlider extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Slider.adaptive(
-              value: value,
-              min: min,
-              max: max,
-              divisions: divisions,
-              onChanged: onChanged,
+              value: widget.value,
+              min: widget.min,
+              max: widget.max,
+              divisions: widget.divisions,
+              onChanged:
+                  widget.onChanged != null ? _handleChanged : null,
             ),
-            if (subtitle != null) Text(subtitle!),
+            if (widget.subtitle != null) Text(widget.subtitle!),
           ],
         ),
       ),

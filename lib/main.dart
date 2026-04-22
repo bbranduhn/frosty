@@ -3,8 +3,10 @@ import 'dart:convert';
 
 import 'package:advanced_in_app_review/advanced_in_app_review.dart';
 import 'package:app_links/app_links.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_performance/firebase_performance.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
@@ -77,6 +79,19 @@ void main() async {
   // Initialize a settings store from the settings JSON string.
   final settingsStore = SettingsStore.fromJson(jsonDecode(userSettings));
 
+  // Disable Firebase collection in debug builds to avoid polluting production data.
+  // In release builds, respect the user's preference.
+  if (kDebugMode) {
+    FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(false);
+    FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(false);
+    FirebasePerformance.instance.setPerformanceCollectionEnabled(false);
+  } else {
+    final shareEnabled = settingsStore.shareCrashLogsAndAnalytics;
+    FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(shareEnabled);
+    FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(shareEnabled);
+    FirebasePerformance.instance.setPerformanceCollectionEnabled(shareEnabled);
+  }
+
   // Create a MobX reaction that will save the settings on disk every time they are changed.
   autorun((_) => prefs.setString('settings', jsonEncode(settingsStore)));
 
@@ -108,6 +123,10 @@ void main() async {
   dioClient.interceptors.add(UnauthorizedInterceptor(authStore));
 
   await authStore.init();
+  FirebaseCrashlytics.instance.setCustomKey('is_logged_in', authStore.isLoggedIn);
+  if (authStore.isLoggedIn && authStore.user.details != null) {
+    FirebaseCrashlytics.instance.setUserIdentifier(authStore.user.details!.id);
+  }
 
   runApp(
     MultiProvider(
@@ -173,6 +192,11 @@ class _MyAppState extends State<MyApp> {
               : settingsStore.themeType == ThemeType.light
               ? ThemeMode.light
               : ThemeMode.dark,
+          navigatorObservers: [
+            FirebaseAnalyticsObserver(
+              analytics: FirebaseAnalytics.instance,
+            ),
+          ],
           home: widget.firstRun ? const OnboardingIntro() : const Home(),
           navigatorKey: navigatorKey,
         );
@@ -227,6 +251,7 @@ class _MyAppState extends State<MyApp> {
         final user = await twitchApi.getUser(userLogin: channelName);
 
         final route = MaterialPageRoute(
+          settings: const RouteSettings(name: VideoChat.routeName),
           builder: (context) => VideoChat(
             userId: user.id,
             userName: user.displayName,

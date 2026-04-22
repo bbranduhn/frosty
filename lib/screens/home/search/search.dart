@@ -43,7 +43,6 @@ class _SearchState extends State<Search> {
             builder: (context) {
               if (_searchStore.searchText.isEmpty) {
                 if (_searchStore.searchHistory.isEmpty) {
-                  // Keep controller attached so borders stay in sync
                   return CustomScrollView(
                     controller: widget.scrollController,
                     slivers: [
@@ -220,35 +219,6 @@ class _SearchState extends State<Search> {
                                     }
                                     _searchStore.textEditingController.clear();
                                     _searchStore.onSearchTextChanged('');
-                                    // Ensure borders reset: scroll back to top and trigger listeners
-                                    if (widget.scrollController.hasClients) {
-                                      widget.scrollController.animateTo(
-                                        0,
-                                        duration: const Duration(
-                                          milliseconds: 150,
-                                        ),
-                                        curve: Curves.easeOut,
-                                      );
-                                    }
-                                    // After the frame (when content swaps), re-evaluate border state
-                                    WidgetsBinding.instance.addPostFrameCallback((
-                                      _,
-                                    ) {
-                                      if (widget.scrollController.hasClients) {
-                                        // Nudge listeners even if already at zero
-                                        final offset =
-                                            widget.scrollController.offset;
-                                        final target = (offset == 0)
-                                            ? 0.01
-                                            : 0.0;
-                                        widget.scrollController.jumpTo(
-                                          (offset == 0) ? target : 0.0,
-                                        );
-                                        if (target == 0.01) {
-                                          widget.scrollController.jumpTo(0.0);
-                                        }
-                                      }
-                                    });
                                   },
                                 )
                               : null,

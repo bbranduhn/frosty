@@ -1159,7 +1159,9 @@ class IRCMessage {
     String? actionLabel,
   }) => IRCMessage(
     raw: '',
-    tags: {},
+    tags: {
+      'tmi-sent-ts': '${DateTime.now().millisecondsSinceEpoch}',
+    },
     command: Command.notice,
     message: message,
     actionCallback: actionCallback,

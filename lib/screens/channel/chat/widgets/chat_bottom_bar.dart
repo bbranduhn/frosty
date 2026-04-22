@@ -19,10 +19,14 @@ class ChatBottomBar extends StatelessWidget {
   /// Passes this to ChatDetails to show "Add chat" option.
   final VoidCallback onAddChat;
 
+  /// When set, indicates merged mode — shown in hint text (e.g., "Chat in xQc").
+  final String? channelDisplayName;
+
   const ChatBottomBar({
     super.key,
     required this.chatStore,
     required this.onAddChat,
+    this.channelDisplayName,
   });
 
   @override
@@ -63,9 +67,11 @@ class ChatBottomBar extends StatelessWidget {
         final isFullscreenOverlay =
             chatStore.settings.fullScreen && context.isLandscape;
 
+        final effectiveChatDelay = chatStore.settings.effectiveChatDelay;
+
         // Check if chat delay is active (for indicator only, doesn't block input)
         final hasChatDelay =
-            chatStore.settings.showVideo && chatStore.settings.chatDelay > 0;
+            chatStore.settings.showVideo && effectiveChatDelay > 0;
 
         const loginTooltipMessage = 'Log in to chat';
 
@@ -299,9 +305,15 @@ class ChatBottomBar extends StatelessWidget {
                                     : isWaitingForAck
                                     ? 'Sending...'
                                     : chatStore.replyingToMessage != null
-                                    ? 'Reply'
+                                    ? channelDisplayName != null
+                                        ? 'Reply in ${channelDisplayName!}'
+                                        : 'Reply'
                                     : hasChatDelay
-                                    ? 'Chat (${chatStore.settings.chatDelay.toInt()}s delay)'
+                                    ? channelDisplayName != null
+                                        ? 'Chat in ${channelDisplayName!} (${effectiveChatDelay.toInt()}s delay)'
+                                        : 'Chat (${effectiveChatDelay.toInt()}s delay)'
+                                    : channelDisplayName != null
+                                    ? 'Chat in ${channelDisplayName!}'
                                     : 'Chat',
                               ),
                               controller: chatStore.textController,

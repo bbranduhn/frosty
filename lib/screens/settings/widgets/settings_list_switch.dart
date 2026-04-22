@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// A custom-styled adaptive [SwitchListTile].
 class SettingsListSwitch extends StatelessWidget {
@@ -21,7 +22,12 @@ class SettingsListSwitch extends StatelessWidget {
       title: Text(title),
       subtitle: subtitle,
       value: value,
-      onChanged: onChanged,
+      onChanged: onChanged != null
+          ? (newValue) {
+              HapticFeedback.selectionClick();
+              onChanged!(newValue);
+            }
+          : null,
     );
   }
 }

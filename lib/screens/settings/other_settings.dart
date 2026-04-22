@@ -65,13 +65,16 @@ class _OtherSettingsState extends State<OtherSettings> {
           title: const Text('Release notes'),
           onTap: () => Navigator.of(
             context,
-          ).push(MaterialPageRoute(builder: (context) => const ReleaseNotes())),
+          ).push(MaterialPageRoute(
+            settings: const RouteSettings(name: ReleaseNotes.routeName),
+            builder: (context) => const ReleaseNotes(),
+          )),
         ),
         ListTile(
           leading: const Icon(Icons.delete_outline_rounded),
           title: const Text('Clear image cache'),
           onTap: () async {
-            HapticFeedback.mediumImpact();
+            HapticFeedback.lightImpact();
 
             await CustomCacheManager.instance.emptyCache();
             await CustomCacheManager.removeOrphanedCacheFiles();

@@ -139,21 +139,23 @@ class VideoOverlay extends StatelessWidget {
       ),
     );
 
-    final fullScreenButton = Tooltip(
-      message: videoStore.settingsStore.fullScreen
-          ? 'Exit fullscreen mode'
-          : 'Enter fullscreen mode',
-      preferBelow: false,
-      child: IconButton(
-        icon: Icon(
-          videoStore.settingsStore.fullScreen
-              ? Icons.fullscreen_exit_rounded
-              : Icons.fullscreen_rounded,
-          color: surfaceColor,
-          shadows: kOverlayShadow,
+    final fullScreenButton = Observer(
+      builder: (_) => Tooltip(
+        message: videoStore.settingsStore.fullScreen
+            ? 'Exit fullscreen mode'
+            : 'Enter fullscreen mode',
+        preferBelow: false,
+        child: IconButton(
+          icon: Icon(
+            videoStore.settingsStore.fullScreen
+                ? Icons.fullscreen_exit_rounded
+                : Icons.fullscreen_rounded,
+            color: surfaceColor,
+            shadows: kOverlayShadow,
+          ),
+          onPressed: () => videoStore.settingsStore.fullScreen =
+              !videoStore.settingsStore.fullScreen,
         ),
-        onPressed: () => videoStore.settingsStore.fullScreen =
-            !videoStore.settingsStore.fullScreen,
       ),
     );
 
@@ -172,16 +174,16 @@ class VideoOverlay extends StatelessWidget {
           if (context.isPortrait) {
             // Detect physical device tilt to rotate to optimal orientation
             final physicalOrientation =
-                await NativeDeviceOrientationCommunicator()
-                    .orientation(useSensor: true);
+                await NativeDeviceOrientationCommunicator().orientation(
+                  useSensor: true,
+                );
 
             // Map native orientation to Flutter's DeviceOrientation
             // iOS: native landscapeLeft = notch left, needs swap to Flutter's landscapeRight
             // Android: direct mapping works correctly
             final needsSwap = Platform.isIOS;
 
-            if (physicalOrientation ==
-                NativeDeviceOrientation.landscapeLeft) {
+            if (physicalOrientation == NativeDeviceOrientation.landscapeLeft) {
               SystemChrome.setPreferredOrientations([
                 needsSwap
                     ? DeviceOrientation.landscapeRight

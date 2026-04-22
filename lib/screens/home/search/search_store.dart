@@ -87,7 +87,6 @@ abstract class SearchStoreBase with Store {
   }
 
   /// Obtain the channels and categories that match the provided [query].
-  /// Adds the query to search history.
   @action
   void handleQuery(String query) {
     if (query.isEmpty) return;
@@ -95,18 +94,18 @@ abstract class SearchStoreBase with Store {
     // Cancel any pending debounce since we're searching immediately.
     _debounceTimer?.cancel();
 
-    // Move the query to the most recent result (top of the stack).
-    _searchHistory.remove(query);
-    _searchHistory.insert(0, query);
-
     _performSearch(query);
   }
 
-  /// Performs the actual search API calls.
+  /// Performs the actual search API calls and saves the query to history.
   @action
   void _performSearch(String query) {
     // Futures are now pending, so isSearching can be cleared.
     _isSearching = false;
+
+    // Move the query to the most recent result (top of the stack).
+    _searchHistory.remove(query);
+    _searchHistory.insert(0, query);
 
     // Fetch the matching channels, sort it by live status, and then set it.
     _channelFuture = twitchApi.searchChannels(query: query).then((channels) {

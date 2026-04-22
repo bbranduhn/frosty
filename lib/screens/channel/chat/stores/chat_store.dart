@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:frosty/apis/twitch_api.dart';
@@ -88,6 +89,10 @@ abstract class ChatStoreBase with Store {
     return false;
   }
 
+  int get _chatDelaySeconds => settings.effectiveChatDelay.toInt();
+
+  bool get _hasActiveChatDelay => settings.showVideo && _chatDelaySeconds > 0;
+
   final TwitchApi twitchApi;
 
   /// The amount of messages to free (remove) when the [_messageLimit] is reached.
@@ -162,6 +167,12 @@ abstract class ChatStoreBase with Store {
   /// The list of chat messages to add once autoscroll is resumed.
   /// This is used as an optimization to prevent the list from being updated/shifted while the user is scrolling.
   final messageBuffer = ObservableList<IRCMessage>();
+
+  /// Pending delayed IRC payloads waiting to be rendered.
+  final _pendingChatCallbacks = <_DelayedCallback>[];
+
+  /// Pending delayed 7TV payloads waiting to be rendered.
+  final _pendingSevenTVCallbacks = <_DelayedCallback>[];
 
   /// The set of message IDs that have been revealed by the user (for deleted messages).
   final revealedMessageIds = ObservableSet<String>();
@@ -372,9 +383,10 @@ abstract class ChatStoreBase with Store {
     // Start chat delay countdown when toggling video on, cancel when off
     reactions.add(
       reaction((_) => settings.showVideo, (showVideo) {
-        if (showVideo && settings.chatDelay > 0) {
+        if (showVideo && settings.effectiveChatDelay > 0) {
           _startChatDelayCountdown();
         } else if (!showVideo) {
+          _flushPendingDelayedCallbacks();
           _cancelChatDelayCountdown();
           _chatDelaySyncCompleted = false;
         }
@@ -384,8 +396,9 @@ abstract class ChatStoreBase with Store {
     // Start chat delay countdown when chatDelay is set (for auto sync mode)
     // Cancel countdown if delay becomes 0
     reactions.add(
-      reaction((_) => settings.chatDelay, (chatDelay) {
+      reaction((_) => settings.effectiveChatDelay, (chatDelay) {
         if (chatDelay == 0) {
+          _flushPendingDelayedCallbacks();
           _cancelChatDelayCountdown();
           _chatDelaySyncCompleted = false;
         } else if (settings.autoSyncChatDelay &&
@@ -443,6 +456,71 @@ abstract class ChatStoreBase with Store {
           textFieldFocusNode.hasFocus &&
           textController.text.split(' ').last.startsWith('@');
     });
+  }
+
+  void _enqueueDelayedCallback(
+    List<_DelayedCallback> queue,
+    void Function() callback,
+  ) {
+    queue.add(
+      _DelayedCallback(
+        releaseAt: DateTime.now().add(Duration(seconds: _chatDelaySeconds)),
+        callback: callback,
+      ),
+    );
+  }
+
+  void _flushDueDelayedCallbacks() {
+    _flushDueDelayedCallbacksForQueue(_pendingChatCallbacks);
+    _flushDueDelayedCallbacksForQueue(_pendingSevenTVCallbacks);
+  }
+
+  void _flushDueDelayedCallbacksForQueue(List<_DelayedCallback> queue) {
+    if (queue.isEmpty) return;
+
+    final now = DateTime.now();
+    final readyCallbacks = <_DelayedCallback>[];
+
+    queue.removeWhere((delayedCallback) {
+      final isReady = !delayedCallback.releaseAt.isAfter(now);
+      if (isReady) {
+        readyCallbacks.add(delayedCallback);
+      }
+      return isReady;
+    });
+
+    for (final delayedCallback in readyCallbacks) {
+      delayedCallback.callback();
+    }
+  }
+
+  void _flushPendingDelayedCallbacks() {
+    _flushPendingDelayedCallbacksForQueue(_pendingChatCallbacks);
+    _flushPendingDelayedCallbacksForQueue(_pendingSevenTVCallbacks);
+  }
+
+  void _flushPendingDelayedCallbacksForQueue(List<_DelayedCallback> queue) {
+    if (queue.isEmpty) return;
+
+    final pendingCallbacks = List<_DelayedCallback>.from(queue);
+    queue.clear();
+
+    for (final delayedCallback in pendingCallbacks) {
+      delayedCallback.callback();
+    }
+  }
+
+  void _clearPendingDelayedCallbacks({
+    bool clearChat = true,
+    bool clearSevenTV = true,
+  }) {
+    if (clearChat) {
+      _pendingChatCallbacks.clear();
+    }
+
+    if (clearSevenTV) {
+      _pendingSevenTVCallbacks.clear();
+    }
   }
 
   /// Handle and process the provided string-representation of the IRC data.
@@ -508,6 +586,7 @@ abstract class ChatStoreBase with Store {
 
                 // Show notification with Twitch's rejection message
                 if (parsedIRCMessage.message != null) {
+                  HapticFeedback.heavyImpact();
                   updateNotification(parsedIRCMessage.message!);
                 }
               }
@@ -741,13 +820,10 @@ abstract class ChatStoreBase with Store {
     );
 
     _sevenTVChannel?.sink.close(1000);
+    _clearPendingDelayedCallbacks(clearChat: false);
     _sevenTVChannel = WebSocketChannel.connect(
       Uri.parse('wss://events.7tv.io/v3'),
     );
-
-    // Track the current connection to prevent stale delayed callbacks
-    final connectionId = DateTime.now().millisecondsSinceEpoch;
-    var currentConnectionId = connectionId;
 
     void listener(dynamic data) {
       // debugPrint(data);
@@ -793,22 +869,25 @@ abstract class ChatStoreBase with Store {
     _sevenTVChannelListener?.cancel();
     _sevenTVChannelListener = _sevenTVChannel?.stream.listen(
       (data) {
-        if (!settings.showVideo || settings.chatDelay == 0) {
+        if (!_hasActiveChatDelay) {
           listener(data);
         } else {
-          final capturedConnectionId = currentConnectionId;
-          Future.delayed(Duration(seconds: settings.chatDelay.toInt()), () {
-            // Only process if this is still the active connection
-            if (capturedConnectionId == currentConnectionId) {
-              listener(data);
-            }
-          });
+          _enqueueDelayedCallback(
+            _pendingSevenTVCallbacks,
+            () => listener(data),
+          );
         }
       },
-      onError: (error) => debugPrint('7TV events error: ${error.toString()}'),
+      onError: (error) {
+        debugPrint('7TV events error: ${error.toString()}');
+        FirebaseCrashlytics.instance.recordError(
+          error,
+          StackTrace.current,
+          reason: '7TV WebSocket error, channel=$channelName',
+        );
+      },
       onDone: () {
-        // Invalidate the current connection to cancel pending delayed callbacks
-        currentConnectionId = 0;
+        _clearPendingDelayedCallbacks(clearChat: false);
         debugPrint('7TV events done');
       },
     );
@@ -818,11 +897,16 @@ abstract class ChatStoreBase with Store {
 
   @action
   Future<void> connectToChat({bool isReconnect = false}) async {
+    FirebaseCrashlytics.instance.setCustomKey('channel', channelName);
+
     // Fetch assets first so they're available for all messages
-    getAssets();
+    getAssets().catchError(
+      (e) => debugPrint('Failed to fetch chat assets: $e'),
+    );
 
     // Cancel existing listener to prevent duplicate message processing
     _channelListener?.cancel();
+    _clearPendingDelayedCallbacks(clearSevenTV: false);
 
     _channel?.sink.close(1000);
     _channel = WebSocketChannel.connect(
@@ -830,13 +914,9 @@ abstract class ChatStoreBase with Store {
     );
 
     // Only show chat delay countdown on initial connection or video toggle, not on reconnects
-    if (!isReconnect && settings.showVideo && settings.chatDelay > 0) {
+    if (!isReconnect && _hasActiveChatDelay) {
       _startChatDelayCountdown();
     }
-
-    // Track the current connection to prevent stale delayed callbacks
-    final connectionId = DateTime.now().millisecondsSinceEpoch;
-    var currentConnectionId = connectionId;
 
     // Listen for new messages and forward them to the handler.
     _channelListener = _channel?.stream.listen(
@@ -844,24 +924,24 @@ abstract class ChatStoreBase with Store {
         final dataStr = data.toString();
 
         // Process immediately if delay is disabled or command should bypass delay
-        if (!settings.showVideo ||
-            settings.chatDelay == 0 ||
-            _shouldBypassDelay(dataStr)) {
+        if (!_hasActiveChatDelay || _shouldBypassDelay(dataStr)) {
           _handleIRCData(dataStr);
         } else {
-          final capturedConnectionId = currentConnectionId;
-          Future.delayed(Duration(seconds: settings.chatDelay.toInt()), () {
-            // Only process if this is still the active connection
-            if (capturedConnectionId == currentConnectionId) {
-              _handleIRCData(dataStr);
-            }
+          _enqueueDelayedCallback(_pendingChatCallbacks, () {
+            _handleIRCData(dataStr);
           });
         }
       },
-      onError: (error) => debugPrint('Chat error: ${error.toString()}'),
+      onError: (error) {
+        debugPrint('Chat error: ${error.toString()}');
+        FirebaseCrashlytics.instance.recordError(
+          error,
+          StackTrace.current,
+          reason: 'IRC WebSocket error, channel=$channelName',
+        );
+      },
       onDone: () async {
-        // Invalidate the current connection to cancel pending delayed callbacks
-        currentConnectionId = 0;
+        _clearPendingDelayedCallbacks(clearSevenTV: false);
 
         // Mark connection as disconnected for UI
         _isConnected = false;
@@ -876,6 +956,9 @@ abstract class ChatStoreBase with Store {
         }
 
         if (_retries >= _maxRetries) {
+          FirebaseCrashlytics.instance.log(
+            'WebSocket reconnection failed after $_maxRetries attempts, channel=$channelName',
+          );
           // Remove the reconnect message before showing final disconnect notice
           if (_reconnectMessage != null) {
             final index = _messages.indexOf(_reconnectMessage!);
@@ -901,6 +984,9 @@ abstract class ChatStoreBase with Store {
 
         // Increment the retry count.
         _retries++;
+        FirebaseCrashlytics.instance.log(
+          'WebSocket reconnecting: attempt $_retries/$_maxRetries, channel=$channelName',
+        );
 
         // Start exponential backoff only after first failed attempt (capped at 8s).
         // First retry is immediate to catch brief network hiccups.
@@ -1001,6 +1087,8 @@ abstract class ChatStoreBase with Store {
 
   @action
   void addMessages() {
+    _flushDueDelayedCallbacks();
+
     if (!_autoScroll || messageBuffer.isEmpty) return;
 
     _messages.addAll(messageBuffer);
@@ -1032,7 +1120,7 @@ abstract class ChatStoreBase with Store {
       messageBuffer.clear();
     }
 
-    var remainingSeconds = settings.chatDelay.toInt();
+    var remainingSeconds = _chatDelaySeconds;
 
     // Create and store reference to the countdown message
     _countdownMessage = IRCMessage.createNotice(
@@ -1091,6 +1179,7 @@ abstract class ChatStoreBase with Store {
 
     // Prevent double-sending while waiting for server acknowledgment
     if (_isWaitingForAck) {
+      HapticFeedback.mediumImpact();
       updateNotification('Please wait, sending previous message...');
       return;
     }
@@ -1126,6 +1215,7 @@ abstract class ChatStoreBase with Store {
       if (_isWaitingForAck) {
         _isWaitingForAck = false;
         toSend = null;
+        HapticFeedback.heavyImpact();
         updateNotification('Message may not have been sent. Please try again.');
       }
     });
@@ -1155,6 +1245,10 @@ abstract class ChatStoreBase with Store {
         userChatMessage.tags['reply-parent-msg-body'] =
             replyingToMessage!.message ?? '';
       }
+
+      // Ensure a timestamp so merged-mode sorting works correctly.
+      userChatMessage.tags['tmi-sent-ts'] ??=
+          '${DateTime.now().millisecondsSinceEpoch}';
 
       toSend = userChatMessage;
     }
@@ -1195,9 +1289,6 @@ abstract class ChatStoreBase with Store {
     // Cancel the previous notification to prevent the notification from phasing in and out
     // when copying messages repeatedly.
     _notificationTimer?.cancel();
-
-    // Provide subtle haptic feedback when notification is triggered
-    HapticFeedback.lightImpact();
 
     // Set the new notification message and create a new timer that will dismiss it after 3 seconds.
     _notification = notificationMessage;
@@ -1250,18 +1341,24 @@ abstract class ChatStoreBase with Store {
 
   @action
   Future<void> getRecentMessage() async {
-    final recentMessages = await twitchApi.getRecentMessages(
-      userLogin: channelName,
-    );
+    try {
+      final recentMessages = await twitchApi.getRecentMessages(
+        userLogin: channelName,
+      );
 
-    for (final message in recentMessages) {
-      _handleIRCData(message);
+      for (final message in recentMessages) {
+        _handleIRCData(message);
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch recent messages: $e');
     }
   }
 
   /// Closes and disposes all the channels and controllers used by the store.
   void dispose() {
     _shouldDisconnect = true;
+
+    _clearPendingDelayedCallbacks();
 
     _messageBufferTimer?.cancel();
     _notificationTimer?.cancel();
@@ -1300,4 +1397,11 @@ abstract class ChatStoreBase with Store {
   void safeRequestFocus() {
     textFieldFocusNode.requestFocus();
   }
+}
+
+class _DelayedCallback {
+  _DelayedCallback({required this.releaseAt, required this.callback});
+
+  final DateTime releaseAt;
+  final void Function() callback;
 }

@@ -38,6 +38,12 @@ abstract class VideoStoreBase with Store {
 
   var _firstTimeSettingQuality = true;
 
+  /// Whether [initVideo] should run on the next [onPageFinished].
+  ///
+  /// Dart-controlled instead of JS-side (`window._injected`) to avoid race
+  /// conditions when `loadRequest` fires before the previous page fully loads.
+  var _needsInit = true;
+
   /// The video web view params used for enabling auto play.
   late final PlatformWebViewControllerCreationParams _videoWebViewParams;
 
@@ -62,7 +68,7 @@ abstract class VideoStoreBase with Store {
             final latencyAsDouble = double.tryParse(numericPart);
 
             if (latencyAsDouble != null) {
-              settingsStore.chatDelay = latencyAsDouble;
+              settingsStore.syncedChatDelay = latencyAsDouble;
             }
           },
         )
@@ -126,18 +132,8 @@ abstract class VideoStoreBase with Store {
           NavigationDelegate(
             onPageFinished: (url) async {
               if (url != videoUrl) return;
-              // Safe evaluation of JavaScript boolean result
-              final result = await videoWebViewController
-                  .runJavaScriptReturningResult(
-                    'window._injected ? true : false',
-                  );
-              final injected = result is bool
-                  ? result
-                  : (result.toString().toLowerCase() == 'true');
-              if (injected) return;
-              await videoWebViewController.runJavaScript(
-                'window._injected = true;',
-              );
+              if (!_needsInit) return;
+              _needsInit = false;
               await initVideo();
               _acceptContentWarning();
             },
@@ -158,6 +154,9 @@ abstract class VideoStoreBase with Store {
 
   /// Tracks the last time stream info was updated to prevent double refresh
   DateTime? _lastStreamInfoUpdate;
+
+  /// Tracks an in-flight stream info request so refreshes can be deduplicated.
+  Future<void>? _streamInfoRequest;
 
   /// Disposes the overlay reactions.
   late final ReactionDisposer _disposeOverlayReaction;
@@ -220,7 +219,7 @@ abstract class VideoStoreBase with Store {
   }) {
     // Reset chat delay to 0 if auto sync is already enabled to prevent starting with old values
     if (settingsStore.autoSyncChatDelay) {
-      settingsStore.chatDelay = 0.0;
+      settingsStore.syncedChatDelay = 0.0;
     }
     // Initialize the video webview params for iOS to enable video autoplay.
     if (WebViewPlatform.instance is WebKitWebViewPlatform) {
@@ -243,38 +242,39 @@ abstract class VideoStoreBase with Store {
 
     // Initialize a reaction that incrementally applies/removes overlay customizations
     // without reloading the webview (which would tear down the HLS stream).
-    _disposeOverlayReaction = reaction(
-      (_) => settingsStore.showOverlay,
-      (showOverlay) async {
-        if (showOverlay) {
-          await _hideDefaultOverlay();
-          if (settingsStore.showLatency || settingsStore.autoSyncChatDelay) {
-            await _listenOnLatencyChanges();
-          }
-          await updateStreamQualities();
-        } else {
-          _showDefaultOverlay();
-          try {
-            videoWebViewController.runJavaScript(
-              'window._latencyTracker?.stop()',
-            );
-          } catch (e) {
-            debugPrint(e.toString());
-          }
+    _disposeOverlayReaction = reaction((_) => settingsStore.showOverlay, (
+      showOverlay,
+    ) async {
+      if (showOverlay) {
+        await _hideDefaultOverlay();
+        if (settingsStore.showLatency || settingsStore.autoSyncChatDelay) {
+          await _listenOnLatencyChanges();
         }
-      },
-    );
+        await updateStreamQualities();
+      } else {
+        _showDefaultOverlay();
+        try {
+          videoWebViewController.runJavaScript(
+            'window._latencyTracker?.stop()',
+          );
+        } catch (e) {
+          debugPrint(e.toString());
+        }
+      }
+    });
 
-    // Initialize a reaction to manage stream info timer based on video mode
+    // Initialize a reaction to manage timers based on video mode
     _disposeVideoModeReaction = reaction((_) => settingsStore.showVideo, (
       showVideo,
     ) {
       if (showVideo) {
         // In video mode, stop the timer since overlay taps handle refreshing
         _stopStreamInfoTimer();
+        _startJsCleanupTimer();
       } else {
         // In chat-only mode, start the timer for automatic updates
         _startStreamInfoTimer();
+        _stopJsCleanupTimer();
         // Ensure overlay timer is active for clean UI
         _scheduleOverlayHide();
       }
@@ -284,6 +284,8 @@ abstract class VideoStoreBase with Store {
     if (!settingsStore.showVideo) {
       _startStreamInfoTimer();
       _scheduleOverlayHide();
+    } else {
+      _startJsCleanupTimer();
     }
 
     // On Android, enable auto PiP mode (setAutoEnterEnabled) if the device supports it.
@@ -299,13 +301,6 @@ abstract class VideoStoreBase with Store {
 
     updateStreamInfo();
 
-    // Initialize periodic JavaScript cleanup timer (every 10 minutes)
-    // This prevents memory accumulation during long viewing sessions
-    _jsCleanupTimer = Timer.periodic(
-      const Duration(minutes: 10),
-      (_) => _performJsSoftReset(),
-    );
-
     // React to changes in latency-related settings mid-session
     // This handles the case where user toggles autoSyncChatDelay or showLatency
     // while already watching a stream
@@ -320,6 +315,20 @@ abstract class VideoStoreBase with Store {
           // Start tracker if either setting is now enabled
           // The init() method is idempotent - won't double-start if already running
           await _listenOnLatencyChanges();
+
+          // If autoSync was just enabled and we already have a cached latency
+          // value (e.g. from showLatency tracking), apply it immediately instead
+          // of waiting for the next tracker cycle (up to 60s).
+          if (autoSync && _latency != null) {
+            final numericPart = _latency!.replaceAll(
+              RegExp(r'[^0-9.]'),
+              '',
+            );
+            final latencyAsDouble = double.tryParse(numericPart);
+            if (latencyAsDouble != null) {
+              settingsStore.syncedChatDelay = latencyAsDouble;
+            }
+          }
         } else {
           // Stop tracker if both settings are now disabled
           try {
@@ -484,7 +493,7 @@ abstract class VideoStoreBase with Store {
   Future<void> _listenOnLatencyChanges() async {
     try {
       await videoWebViewController.runJavaScript(r'''
-        window._latencyTracker = {
+        window._latencyTracker ??= {
           CYCLE_INTERVAL: 60000,
           STATS_ACTIVE_TIME: 1500,
           INITIAL_RETRY_INTERVAL: 3000,
@@ -495,11 +504,14 @@ abstract class VideoStoreBase with Store {
           timeoutId: null,
           isRunning: false,
           overlayVisible: true,
+          isCycling: false,
 
           init() {
             if (this.isRunning) return;
             this.isRunning = true;
-            this._cycle();
+            if (!this.isCycling && !this.timeoutId) {
+              this._cycle();
+            }
           },
 
           stop() {
@@ -513,58 +525,67 @@ abstract class VideoStoreBase with Store {
           setOverlayVisible(visible) {
             this.overlayVisible = visible;
             // Resume immediately when overlay becomes visible
-            if (visible && this.isRunning && !this.timeoutId) {
+            if (visible && this.isRunning && !this.isCycling && !this.timeoutId) {
               this._cycle();
             }
           },
 
           async _cycle() {
-            // Clear timeout ID synchronously at entry to prevent race conditions
-            // (e.g., setOverlayVisible calling _cycle while timeout is firing)
-            const currentTimeoutId = this.timeoutId;
-            this.timeoutId = null;
-            if (currentTimeoutId) {
-              clearTimeout(currentTimeoutId);
+            if (this.isCycling) return;
+            this.isCycling = true;
+
+            try {
+              // Clear timeout ID synchronously at entry to prevent race conditions
+              // (e.g., setOverlayVisible calling _cycle while timeout is firing)
+              const currentTimeoutId = this.timeoutId;
+              this.timeoutId = null;
+              if (currentTimeoutId) {
+                clearTimeout(currentTimeoutId);
+              }
+
+              if (!this.isRunning) return;
+
+              // Skip cycle entirely if overlay not visible - major CPU savings
+              if (!this.overlayVisible) {
+                this.timeoutId = setTimeout(() => this._cycle(), 5000);
+                return;
+              }
+
+              // Defer if another operation (e.g., quality selection) is using the settings menu
+              if (window._promiseQueueLength > 0) {
+                this.timeoutId = setTimeout(() => this._cycle(), 2000);
+                return;
+              }
+
+              this.cycleCount++;
+              const cycleStart = Date.now();
+
+              await this._setStatsEnabled(true);
+
+              // Wait longer on first cycle for stats to populate
+              const waitTime = this.cycleCount === 1 ? 3000 : this.STATS_ACTIVE_TIME;
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+
+              this._readLatency();
+              await this._setStatsEnabled(false);
+
+              if (!this.isRunning) return;
+
+              const totalActiveTime = Date.now() - cycleStart;
+
+              // Calculate next interval
+              let nextInterval;
+              if (!this.hasInitialLatency && this.cycleCount < this.MAX_INITIAL_RETRIES) {
+                nextInterval = this.INITIAL_RETRY_INTERVAL;
+              } else {
+                nextInterval = this.CYCLE_INTERVAL - totalActiveTime;
+              }
+
+              // Schedule next cycle
+              this.timeoutId = setTimeout(() => this._cycle(), Math.max(nextInterval, 1000));
+            } finally {
+              this.isCycling = false;
             }
-
-            if (!this.isRunning) return;
-
-            // Skip cycle entirely if overlay not visible - major CPU savings
-            if (!this.overlayVisible) {
-              this.timeoutId = setTimeout(() => this._cycle(), 5000);
-              return;
-            }
-
-            // Defer if another operation (e.g., quality selection) is using the settings menu
-            if (window._promiseQueueLength > 0) {
-              this.timeoutId = setTimeout(() => this._cycle(), 2000);
-              return;
-            }
-
-            this.cycleCount++;
-            const cycleStart = Date.now();
-
-            await this._setStatsEnabled(true);
-
-            // Wait longer on first cycle for stats to populate
-            const waitTime = this.cycleCount === 1 ? 3000 : this.STATS_ACTIVE_TIME;
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-
-            this._readLatency();
-            await this._setStatsEnabled(false);
-
-            const totalActiveTime = Date.now() - cycleStart;
-
-            // Calculate next interval
-            let nextInterval;
-            if (!this.hasInitialLatency && this.cycleCount < this.MAX_INITIAL_RETRIES) {
-              nextInterval = this.INITIAL_RETRY_INTERVAL;
-            } else {
-              nextInterval = this.CYCLE_INTERVAL - totalActiveTime;
-            }
-
-            // Schedule next cycle
-            this.timeoutId = setTimeout(() => this._cycle(), Math.max(nextInterval, 1000));
           },
 
           async _setStatsEnabled(enable) {
@@ -619,6 +640,7 @@ abstract class VideoStoreBase with Store {
 
         window._latencyTracker.init();
       ''');
+      _updateLatencyTrackerVisibility(_overlayVisible);
     } catch (e) {
       debugPrint(e.toString());
     }
@@ -798,6 +820,9 @@ abstract class VideoStoreBase with Store {
                 videoElement.textTracks[0].mode = "hidden";
               }
             }
+
+            // Explicitly attempt autoplay in case the player loaded paused
+            try { await videoElement.play(); } catch (e) {}
           });
         ''');
         if (settingsStore.showOverlay) {
@@ -859,6 +884,20 @@ abstract class VideoStoreBase with Store {
     }
   }
 
+  void _startJsCleanupTimer() {
+    if (_jsCleanupTimer?.isActive == true) return;
+
+    _jsCleanupTimer = Timer.periodic(
+      const Duration(minutes: 10),
+      (_) => _performJsSoftReset(),
+    );
+  }
+
+  void _stopJsCleanupTimer() {
+    _jsCleanupTimer?.cancel();
+    _jsCleanupTimer = null;
+  }
+
   void _scheduleOverlayHide([Duration delay = const Duration(seconds: 5)]) {
     _overlayTimer?.cancel();
 
@@ -893,6 +932,11 @@ abstract class VideoStoreBase with Store {
   /// Set [forceUpdate] to true to bypass the rate limiting check.
   @action
   Future<void> updateStreamInfo({bool forceUpdate = false}) async {
+    if (_streamInfoRequest != null) {
+      await _streamInfoRequest;
+      return;
+    }
+
     // Rate limiting: prevent too frequent updates unless forced
     final now = DateTime.now();
     if (!forceUpdate && _lastStreamInfoUpdate != null) {
@@ -904,6 +948,19 @@ abstract class VideoStoreBase with Store {
 
     _lastStreamInfoUpdate = now;
 
+    final request = _updateStreamInfoInternal();
+    _streamInfoRequest = request;
+
+    try {
+      await request;
+    } finally {
+      if (identical(_streamInfoRequest, request)) {
+        _streamInfoRequest = null;
+      }
+    }
+  }
+
+  Future<void> _updateStreamInfoInternal() async {
     try {
       _streamInfo = await twitchApi.getStream(userLogin: userLogin);
       // Clear offline info when stream is live
@@ -947,27 +1004,24 @@ abstract class VideoStoreBase with Store {
   }
 
   /// Refreshes the stream webview and updates the stream info.
-  ///
-  /// Performs a hard refresh by loading about:blank first to completely clear
-  /// the webview state, then immediately reloads the video URL. This is more
-  /// reliable than a soft reload when the webview is sluggish.
   @action
   Future<void> handleRefresh() async {
     HapticFeedback.lightImpact();
     _paused = true;
     _firstTimeSettingQuality = true;
     _isInPipMode = false;
+    _latency = null;
+    _availableStreamQualities = [];
 
-    // Stop latency tracker immediately to free up JS main thread for refresh
+    // Signal that initVideo() should run on the next onPageFinished
+    _needsInit = true;
+
     try {
       videoWebViewController.runJavaScript('window._latencyTracker?.stop()');
     } catch (e) {
       // Ignore - may not exist yet
     }
 
-    // Hard refresh: clear everything by loading blank page first
-    await videoWebViewController.loadRequest(Uri.parse('about:blank'));
-    // Then immediately load the video URL for a fresh start
     await videoWebViewController.loadRequest(Uri.parse(videoUrl));
 
     updateStreamInfo();

@@ -56,6 +56,31 @@ mixin _$ChatTabsStore on ChatTabsStoreBase, Store {
     () => super.showTabBar,
     name: 'ChatTabsStoreBase.showTabBar',
   )).value;
+  Computed<Map<String, UserTwitch>>? _$mergedChannelIdToUserTwitchComputed;
+
+  @override
+  Map<String, UserTwitch> get mergedChannelIdToUserTwitch =>
+      (_$mergedChannelIdToUserTwitchComputed ??=
+              Computed<Map<String, UserTwitch>>(
+                () => super.mergedChannelIdToUserTwitch,
+                name: 'ChatTabsStoreBase.mergedChannelIdToUserTwitch',
+              ))
+          .value;
+  Computed<List<MergedMessage>>? _$mergedMessagesComputed;
+
+  @override
+  List<MergedMessage> get mergedMessages =>
+      (_$mergedMessagesComputed ??= Computed<List<MergedMessage>>(
+        () => super.mergedMessages,
+        name: 'ChatTabsStoreBase.mergedMessages',
+      )).value;
+  Computed<int>? _$mergedBufferCountComputed;
+
+  @override
+  int get mergedBufferCount => (_$mergedBufferCountComputed ??= Computed<int>(
+    () => super.mergedBufferCount,
+    name: 'ChatTabsStoreBase.mergedBufferCount',
+  )).value;
 
   late final _$_tabsAtom = Atom(
     name: 'ChatTabsStoreBase._tabs',
@@ -95,10 +120,108 @@ mixin _$ChatTabsStore on ChatTabsStoreBase, Store {
     });
   }
 
+  late final _$mergedModeAtom = Atom(
+    name: 'ChatTabsStoreBase.mergedMode',
+    context: context,
+  );
+
+  @override
+  bool get mergedMode {
+    _$mergedModeAtom.reportRead();
+    return super.mergedMode;
+  }
+
+  @override
+  set mergedMode(bool value) {
+    _$mergedModeAtom.reportWrite(value, super.mergedMode, () {
+      super.mergedMode = value;
+    });
+  }
+
+  late final _$_mergedAutoScrollAtom = Atom(
+    name: 'ChatTabsStoreBase._mergedAutoScroll',
+    context: context,
+  );
+
+  bool get mergedAutoScroll {
+    _$_mergedAutoScrollAtom.reportRead();
+    return super._mergedAutoScroll;
+  }
+
+  @override
+  bool get _mergedAutoScroll => mergedAutoScroll;
+
+  @override
+  set _mergedAutoScroll(bool value) {
+    _$_mergedAutoScrollAtom.reportWrite(value, super._mergedAutoScroll, () {
+      super._mergedAutoScroll = value;
+    });
+  }
+
+  late final _$_mergedRenderedMessagesAtom = Atom(
+    name: 'ChatTabsStoreBase._mergedRenderedMessages',
+    context: context,
+  );
+
+  List<MergedMessage> get mergedRenderedMessages {
+    _$_mergedRenderedMessagesAtom.reportRead();
+    return super._mergedRenderedMessages;
+  }
+
+  @override
+  List<MergedMessage> get _mergedRenderedMessages => mergedRenderedMessages;
+
+  @override
+  set _mergedRenderedMessages(List<MergedMessage> value) {
+    _$_mergedRenderedMessagesAtom.reportWrite(
+      value,
+      super._mergedRenderedMessages,
+      () {
+        super._mergedRenderedMessages = value;
+      },
+    );
+  }
+
   late final _$ChatTabsStoreBaseActionController = ActionController(
     name: 'ChatTabsStoreBase',
     context: context,
   );
+
+  @override
+  void _refreshMergedMessages() {
+    final _$actionInfo = _$ChatTabsStoreBaseActionController.startAction(
+      name: 'ChatTabsStoreBase._refreshMergedMessages',
+    );
+    try {
+      return super._refreshMergedMessages();
+    } finally {
+      _$ChatTabsStoreBaseActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  void toggleMergedMode() {
+    final _$actionInfo = _$ChatTabsStoreBaseActionController.startAction(
+      name: 'ChatTabsStoreBase.toggleMergedMode',
+    );
+    try {
+      return super.toggleMergedMode();
+    } finally {
+      _$ChatTabsStoreBaseActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  void resumeMergedScroll() {
+    final _$actionInfo = _$ChatTabsStoreBaseActionController.startAction(
+      name: 'ChatTabsStoreBase.resumeMergedScroll',
+    );
+    try {
+      return super.resumeMergedScroll();
+    } finally {
+      _$ChatTabsStoreBaseActionController.endAction(_$actionInfo);
+    }
+  }
 
   @override
   void activateTab(int index) {
@@ -133,6 +256,18 @@ mixin _$ChatTabsStore on ChatTabsStoreBase, Store {
   }
 
   @override
+  void deactivateTab(int index) {
+    final _$actionInfo = _$ChatTabsStoreBaseActionController.startAction(
+      name: 'ChatTabsStoreBase.deactivateTab',
+    );
+    try {
+      return super.deactivateTab(index);
+    } finally {
+      _$ChatTabsStoreBaseActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   bool removeTab(int index) {
     final _$actionInfo = _$ChatTabsStoreBaseActionController.startAction(
       name: 'ChatTabsStoreBase.removeTab',
@@ -157,12 +292,12 @@ mixin _$ChatTabsStore on ChatTabsStoreBase, Store {
   }
 
   @override
-  void setActiveTab(int index) {
+  void setActiveTab(int index, {bool silent = false}) {
     final _$actionInfo = _$ChatTabsStoreBaseActionController.startAction(
       name: 'ChatTabsStoreBase.setActiveTab',
     );
     try {
-      return super.setActiveTab(index);
+      return super.setActiveTab(index, silent: silent);
     } finally {
       _$ChatTabsStoreBaseActionController.endAction(_$actionInfo);
     }
@@ -172,10 +307,14 @@ mixin _$ChatTabsStore on ChatTabsStoreBase, Store {
   String toString() {
     return '''
 activeTabIndex: ${activeTabIndex},
+mergedMode: ${mergedMode},
 activeTab: ${activeTab},
 activeChatStore: ${activeChatStore},
 canAddTab: ${canAddTab},
-showTabBar: ${showTabBar}
+showTabBar: ${showTabBar},
+mergedChannelIdToUserTwitch: ${mergedChannelIdToUserTwitch},
+mergedMessages: ${mergedMessages},
+mergedBufferCount: ${mergedBufferCount}
     ''';
   }
 }

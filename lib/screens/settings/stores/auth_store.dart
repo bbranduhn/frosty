@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:frosty/apis/base_api_client.dart';
@@ -250,6 +251,7 @@ abstract class AuthBase with Store {
         }
       }
 
+      FirebaseCrashlytics.instance.setCustomKey('is_logged_in', _isLoggedIn);
       _error = null;
     } catch (e) {
       debugPrint(e.toString());
@@ -277,6 +279,8 @@ abstract class AuthBase with Store {
       // Set the login status to logged in.
       if (user.details != null) {
         _isLoggedIn = true;
+        FirebaseCrashlytics.instance.setCustomKey('is_logged_in', true);
+        FirebaseCrashlytics.instance.setUserIdentifier(user.details!.id);
         _stopReconnectLoop();
       }
     } catch (e) {
@@ -307,6 +311,8 @@ abstract class AuthBase with Store {
 
       // Set the login status to logged out.
       _isLoggedIn = false;
+      FirebaseCrashlytics.instance.setCustomKey('is_logged_in', false);
+      FirebaseCrashlytics.instance.setUserIdentifier('');
 
       debugPrint('Successfully logged out');
     } catch (e) {
@@ -321,6 +327,9 @@ abstract class AuthBase with Store {
       try {
         _reconnectAttempts++;
         if (_reconnectAttempts > _maxReconnectAttempts) {
+          FirebaseCrashlytics.instance.log(
+            'Auth reconnection exhausted after $_maxReconnectAttempts attempts',
+          );
           await logout();
           return;
         }

@@ -86,14 +86,17 @@ class StreamCard extends StatelessWidget {
         alignment: AlignmentDirectional.bottomEnd,
         children: [
           GestureDetector(
-            onLongPress: () => showDialog(
-              context: context,
-              builder: (context) => FrostyPhotoViewDialog(
-                imageUrl: streamInfo
-                    .thumbnailUrl, // Pass original URL with {width}x{height} placeholder
-                cacheKey: cacheKey,
-              ),
-            ),
+            onLongPress: () {
+              HapticFeedback.lightImpact();
+              showDialog(
+                context: context,
+                builder: (context) => FrostyPhotoViewDialog(
+                  imageUrl: streamInfo
+                      .thumbnailUrl, // Pass original URL with {width}x{height} placeholder
+                  cacheKey: cacheKey,
+                ),
+              );
+            },
             child: thumbnail,
           ),
           Container(
@@ -165,6 +168,7 @@ class StreamCard extends StatelessWidget {
                   ? () => Navigator.push(
                       context,
                       MaterialPageRoute(
+                        settings: const RouteSettings(name: CategoryStreams.routeName),
                         builder: (context) =>
                             CategoryStreams(categoryId: streamInfo.gameId),
                       ),
@@ -200,6 +204,7 @@ class StreamCard extends StatelessWidget {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
+          settings: const RouteSettings(name: VideoChat.routeName),
           builder: (context) => VideoChat(
             userId: streamInfo.userId,
             userName: streamInfo.userName,

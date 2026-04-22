@@ -30,7 +30,7 @@ class _AccentColorPickerDialogState extends State<AccentColorPickerDialog> {
   }
 
   void _generateRandomColor() {
-    HapticFeedback.mediumImpact();
+    HapticFeedback.lightImpact();
     final random = Random();
     final newColor = Color.fromARGB(
       255,

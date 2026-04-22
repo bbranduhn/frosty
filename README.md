@@ -95,7 +95,7 @@ For a more detailed overview, visit [frostyapp.io](https://www.frostyapp.io/).
 
 6. Choose an emulator or device and run the app! The included VS Code launch configurations will automatically read your `.env` file.
 
-7. (Optional) Run `./scripts/get-twitch-token.sh` to quickly get a user auth token. Long-press the **Anonymous** account tile in the app to log in from your clipboard.
+7. (Optional) Run `dart run scripts/get_twitch_token.dart` to quickly get a user auth token. Long-press the **Anonymous** account tile in the app to log in.
 
 > [!IMPORTANT]
 > Frosty uses [MobX](https://mobx.netlify.app/) for state management. Please refer to the documentation about code generation, otherwise your changes within MobX stores may not be applied.

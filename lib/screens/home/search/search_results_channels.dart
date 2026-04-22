@@ -39,6 +39,7 @@ class _SearchResultsChannelsState extends State<SearchResultsChannels> {
       Navigator.push(
         context,
         MaterialPageRoute(
+          settings: const RouteSettings(name: VideoChat.routeName),
           builder: (context) => VideoChat(
             userId: channelInfo.broadcasterId,
             userName: channelInfo.broadcasterName,
@@ -120,6 +121,7 @@ class _SearchResultsChannelsState extends State<SearchResultsChannels> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
+                        settings: const RouteSettings(name: VideoChat.routeName),
                         builder: (context) => VideoChat(
                           userId: channel.id,
                           userName: channel.displayName,
@@ -128,7 +130,7 @@ class _SearchResultsChannelsState extends State<SearchResultsChannels> {
                       ),
                     ),
                     onLongPress: () {
-                      HapticFeedback.lightImpact();
+                      HapticFeedback.mediumImpact();
 
                       showModalBottomSheetWithProperFocus(
                         context: context,

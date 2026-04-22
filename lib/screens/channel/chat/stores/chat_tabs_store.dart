@@ -1,7 +1,12 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:frosty/apis/bttv_api.dart';
 import 'package:frosty/apis/ffz_api.dart';
 import 'package:frosty/apis/seventv_api.dart';
 import 'package:frosty/apis/twitch_api.dart';
+import 'package:frosty/models/irc.dart';
+import 'package:frosty/models/user.dart';
 import 'package:frosty/screens/channel/chat/details/chat_details_store.dart';
 import 'package:frosty/screens/channel/chat/stores/chat_assets_store.dart';
 import 'package:frosty/screens/channel/chat/stores/chat_store.dart';
@@ -65,12 +70,23 @@ class ChatTabInfo {
   });
 }
 
+/// A message paired with its source ChatStore for merged view rendering.
+class MergedMessage {
+  final IRCMessage ircMessage;
+  final ChatStore chatStore;
+
+  const MergedMessage({required this.ircMessage, required this.chatStore});
+}
+
 /// Store that manages multiple chat tabs.
 class ChatTabsStore = ChatTabsStoreBase with _$ChatTabsStore;
 
 abstract class ChatTabsStoreBase with Store {
   /// Maximum number of tabs allowed.
   static const maxTabs = 10;
+
+  /// Max messages to render in merged view when autoscrolling.
+  static const _mergedRenderLimit = 100;
 
   /// API services needed for creating ChatStore instances.
   final TwitchApi twitchApi;
@@ -108,6 +124,153 @@ abstract class ChatTabsStoreBase with Store {
   @computed
   bool get showTabBar => _tabs.length > 1;
 
+  /// Whether merged chat mode is active (session-only, not persisted).
+  @observable
+  var mergedMode = false;
+
+  /// Channel profiles for badge rendering in merged view.
+  final _tabChannelProfiles = ObservableMap<String, UserTwitch>();
+
+  /// Scroll controller for the merged chat view.
+  final mergedScrollController = ScrollController();
+
+  /// Whether the merged view should auto-scroll.
+  @readonly
+  var _mergedAutoScroll = true;
+
+  /// Timer-driven rendered messages for merged view.
+  /// Updated every 200ms to match normal chat's batched flush cadence,
+  /// instead of reacting to each per-tab ObservableList mutation.
+  @readonly
+  var _mergedRenderedMessages = <MergedMessage>[];
+
+  /// Timer that drives merged message rendering at a fixed cadence.
+  Timer? _mergedRenderTimer;
+
+  /// Frozen snapshot of merged messages when user scrolls up.
+  /// Prevents new messages from causing scroll jumps while reading.
+  List<MergedMessage>? _mergedSnapshot;
+
+  /// Total message count across all tabs when the snapshot was taken.
+  int _mergedSnapshotTotalCount = 0;
+
+  /// Combined channel-to-user map for merged view badge rendering.
+  @computed
+  Map<String, UserTwitch> get mergedChannelIdToUserTwitch {
+    final merged = <String, UserTwitch>{};
+    for (final tab in _tabs) {
+      if (tab.chatStore != null) {
+        merged.addAll(tab.chatStore!.assetsStore.channelIdToUserTwitch);
+      }
+    }
+    merged.addAll(_tabChannelProfiles);
+    return merged;
+  }
+
+  static int _compareByTimestamp(MergedMessage a, MergedMessage b) {
+    final aTs = int.tryParse(a.ircMessage.tags['tmi-sent-ts'] ?? '') ?? 0;
+    final bTs = int.tryParse(b.ircMessage.tags['tmi-sent-ts'] ?? '') ?? 0;
+    return aTs.compareTo(bTs);
+  }
+
+  /// Adds messages from [store] to [out], deduplicating by message ID
+  /// (handles Twitch shared chat where the same message arrives on multiple
+  /// IRC connections). Includes messageBuffer only when the tab's own
+  /// autoScroll is off (paused tabs whose timer won't flush).
+  void _collectMessages(
+    ChatStore store,
+    List<MergedMessage> out,
+    Set<String> seenIds, {
+    int? tailCount,
+  }) {
+    final msgs = store.messages;
+    final start =
+        tailCount != null && msgs.length > tailCount ? msgs.length - tailCount : 0;
+    for (var i = start; i < msgs.length; i++) {
+      final id = msgs[i].tags['id'];
+      if (id != null && !seenIds.add(id)) continue;
+      out.add(MergedMessage(ircMessage: msgs[i], chatStore: store));
+    }
+    // Only read messageBuffer for paused tabs — their timer won't flush
+    // so these messages would otherwise be invisible in merged view.
+    if (!store.autoScroll) {
+      for (final msg in store.messageBuffer) {
+        final id = msg.tags['id'];
+        if (id != null && !seenIds.add(id)) continue;
+        out.add(MergedMessage(ircMessage: msg, chatStore: store));
+      }
+    }
+  }
+
+  /// Collects, sorts, and caps all messages from all tabs.
+  List<MergedMessage> _computeAllMergedMessages() {
+    final allMessages = <MergedMessage>[];
+    final seenIds = <String>{};
+    for (final tab in _tabs) {
+      if (tab.chatStore == null) continue;
+      _collectMessages(tab.chatStore!, allMessages, seenIds);
+    }
+    allMessages.sort(_compareByTimestamp);
+    return allMessages;
+  }
+
+  /// Fast path: only collects the tail of each tab's messages for autoscroll.
+  /// Instead of sorting all 50k messages, sorts at most k*100 items.
+  List<MergedMessage> _computeRecentMergedMessages() {
+    final recent = <MergedMessage>[];
+    final seenIds = <String>{};
+    for (final tab in _tabs) {
+      if (tab.chatStore == null) continue;
+      _collectMessages(tab.chatStore!, recent, seenIds, tailCount: _mergedRenderLimit);
+    }
+    recent.sort(_compareByTimestamp);
+    if (recent.length > _mergedRenderLimit) {
+      return recent.sublist(recent.length - _mergedRenderLimit);
+    }
+    return recent;
+  }
+
+  /// Interleaved messages from all activated tabs, sorted by timestamp.
+  /// During autoscroll, returns timer-driven [_mergedRenderedMessages] which
+  /// updates every 200ms — matching normal chat's batched flush cadence.
+  /// When scrolled up, returns a frozen snapshot.
+  @computed
+  List<MergedMessage> get mergedMessages {
+    if (!_mergedAutoScroll && _mergedSnapshot != null) {
+      return _mergedSnapshot!;
+    }
+    return _mergedRenderedMessages;
+  }
+
+  /// Refreshes the rendered merged messages. Called by the render timer.
+  @action
+  void _refreshMergedMessages() {
+    if (!_mergedAutoScroll) return;
+    _mergedRenderedMessages = _computeRecentMergedMessages();
+  }
+
+  /// Count of new messages since the user scrolled up (for "N new messages").
+  /// Total messages (messages + messageBuffer) across all tabs.
+  int _totalMessageCount() {
+    var total = 0;
+    for (final tab in _tabs) {
+      if (tab.chatStore != null) {
+        total +=
+            tab.chatStore!.messages.length + tab.chatStore!.messageBuffer.length;
+      }
+    }
+    return total;
+  }
+
+  @computed
+  int get mergedBufferCount {
+    if (!_mergedAutoScroll && _mergedSnapshot != null) {
+      final diff = _totalMessageCount() - _mergedSnapshotTotalCount;
+      return diff > 0 ? diff : 0;
+    }
+    return 0;
+  }
+
   /// Public getter for the tabs list.
   List<ChatTabInfo> get tabs => _tabs;
 
@@ -124,7 +287,9 @@ abstract class ChatTabsStoreBase with Store {
     required String primaryDisplayName,
   }) {
     // Enable wakelock once for all chat tabs
-    WakelockPlus.enable();
+    if (settingsStore.keepScreenAwake) {
+      WakelockPlus.enable();
+    }
 
     // Initialize with the primary channel tab
     _addPrimaryTab(
@@ -137,6 +302,26 @@ abstract class ChatTabsStoreBase with Store {
     if (settingsStore.persistChatTabs) {
       _restoreSecondaryTabs(primaryChannelId: primaryChannelId);
     }
+
+    // Set up merged scroll listener once (reused across toggle cycles)
+    mergedScrollController.addListener(() {
+      if (!mergedScrollController.hasClients) return;
+      runInAction(() {
+        if (mergedScrollController.position.pixels <= 0) {
+          if (!_mergedAutoScroll) {
+            _mergedSnapshot = null;
+            _mergedAutoScroll = true;
+          }
+        } else if (mergedScrollController.position.pixels > 0) {
+          if (_mergedAutoScroll) {
+            // Capture snapshot so the list stays frozen while scrolling
+            _mergedSnapshot = _computeAllMergedMessages();
+            _mergedSnapshotTotalCount = _totalMessageCount();
+            _mergedAutoScroll = false;
+          }
+        }
+      });
+    });
   }
 
   /// Creates a ChatStore for a given channel.
@@ -164,6 +349,62 @@ abstract class ChatTabsStoreBase with Store {
         globalAssetsStore: globalAssetsStore,
       ),
     );
+  }
+
+  /// Toggles merged chat mode. Only already-activated tabs are included;
+  /// tapping a lazy tab in merged mode activates it and adds it to the merge.
+  @action
+  void toggleMergedMode() {
+    mergedMode = !mergedMode;
+    if (mergedMode) {
+      // Reset scroll state
+      _mergedAutoScroll = true;
+      _mergedSnapshot = null;
+      // Fetch channel profiles for activated tabs only
+      for (final tab in _tabs) {
+        if (tab.chatStore != null) {
+          _fetchTabChannelProfile(tab);
+        }
+      }
+      // Start render timer — compute immediately then every 200ms
+      _refreshMergedMessages();
+      _mergedRenderTimer?.cancel();
+      _mergedRenderTimer = Timer.periodic(
+        const Duration(milliseconds: 200),
+        (_) => _refreshMergedMessages(),
+      );
+    } else {
+      _mergedRenderTimer?.cancel();
+      _mergedRenderTimer = null;
+      _mergedRenderedMessages = [];
+    }
+  }
+
+  /// Re-enables auto-scroll and jumps to the latest message in merged view.
+  @action
+  void resumeMergedScroll() {
+    _mergedSnapshot = null;
+    _mergedAutoScroll = true;
+    // Refresh immediately so the list shows latest messages before the
+    // next timer tick.
+    _refreshMergedMessages();
+    mergedScrollController.jumpTo(0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mergedScrollController.hasClients) {
+        mergedScrollController.jumpTo(0);
+      }
+    });
+  }
+
+  /// Fetches the channel profile for badge rendering in merged view.
+  Future<void> _fetchTabChannelProfile(ChatTabInfo tab) async {
+    if (_tabChannelProfiles.containsKey(tab.channelId)) return;
+    try {
+      final user = await twitchApi.getUser(id: tab.channelId);
+      _tabChannelProfiles[tab.channelId] = user;
+    } catch (e) {
+      debugPrint('Failed to fetch profile for ${tab.channelLogin}: $e');
+    }
   }
 
   /// Activates a tab by creating its ChatStore if not already activated.
@@ -279,10 +520,48 @@ abstract class ChatTabsStoreBase with Store {
     activateTab(newIndex);
     activeTabIndex = newIndex;
 
+    // If in merged mode, fetch the new tab's channel profile
+    if (mergedMode) {
+      _fetchTabChannelProfile(_tabs[newIndex]);
+    }
+
     // Sync to settings for persistence
     _syncSecondaryTabsToSettings();
 
     return true;
+  }
+
+  /// Deactivates a tab by disposing its ChatStore without removing the tab.
+  /// The tab stays in the tab bar but appears dimmed. Tapping reactivates it.
+  @action
+  void deactivateTab(int index) {
+    if (index < 0 || index >= _tabs.length) return;
+    final tab = _tabs[index];
+    if (tab.isPrimary) return;
+    if (tab.chatStore == null) return;
+
+    // If this is the active tab, switch to primary
+    if (index == activeTabIndex) {
+      activeTabIndex = 0;
+    }
+
+    // Clean up merged mode state
+    if (mergedMode) {
+      _tabChannelProfiles.remove(tab.channelId);
+      _mergedSnapshot = null;
+    }
+
+    // Dispose the ChatStore (closes IRC connection)
+    tab.chatStore!.dispose();
+    tab.chatStore = null;
+
+    // Exit merged mode if fewer than 2 tabs remain activated
+    if (mergedMode && _tabs.where((t) => t.chatStore != null).length < 2) {
+      mergedMode = false;
+      _mergedRenderTimer?.cancel();
+      _mergedRenderTimer = null;
+      _mergedRenderedMessages = [];
+    }
   }
 
   /// Removes the tab at the given index.
@@ -299,11 +578,24 @@ abstract class ChatTabsStoreBase with Store {
       return false;
     }
 
+    // Clean up merged mode state
+    _tabChannelProfiles.remove(_tabs[index].channelId);
+    // Clear stale snapshot that may reference this tab's disposed ChatStore
+    _mergedSnapshot = null;
+
     // Dispose the ChatStore before removing (if activated)
     _tabs[index].chatStore?.dispose();
 
     // Remove the tab
     _tabs.removeAt(index);
+
+    // Disable merged mode if only 1 tab remains
+    if (_tabs.length <= 1 && mergedMode) {
+      mergedMode = false;
+      _mergedRenderTimer?.cancel();
+      _mergedRenderTimer = null;
+      _mergedRenderedMessages = [];
+    }
 
     // Adjust active index if necessary
     if (activeTabIndex >= _tabs.length) {
@@ -350,11 +642,17 @@ abstract class ChatTabsStoreBase with Store {
   }
 
   /// Sets the active tab to the given index.
+  ///
+  /// When [silent] is true, the current tab's draft text and reply state are
+  /// preserved. Used for programmatic switches (e.g., reply/paste routing in
+  /// merged mode) where wiping the draft would lose user work.
   @action
-  void setActiveTab(int index) {
+  void setActiveTab(int index, {bool silent = false}) {
     if (index >= 0 && index < _tabs.length) {
-      // Clear text input and emote menu when switching tabs
-      if (index != activeTabIndex) {
+      // Clear text input and emote menu when switching tabs.
+      // Skip in merged mode — tabs act as send-target selectors, not
+      // view switches, so draft/reply state should be preserved.
+      if (index != activeTabIndex && !silent && !mergedMode) {
         final currentStore = _tabs[activeTabIndex].chatStore;
         if (currentStore != null) {
           // Close emote menu if open
@@ -371,16 +669,23 @@ abstract class ChatTabsStoreBase with Store {
       // Activate the target tab if not already activated
       activateTab(index);
 
+      if (mergedMode) {
+        _fetchTabChannelProfile(_tabs[index]);
+      }
+
       activeTabIndex = index;
     }
   }
 
   /// Disposes all ChatStores and cleans up resources.
   void dispose() {
+    _mergedRenderTimer?.cancel();
+    _mergedRenderTimer = null;
     for (final tab in _tabs) {
       tab.chatStore?.dispose();
     }
     _tabs.clear();
+    mergedScrollController.dispose();
 
     // Disable wakelock once after all tabs disposed
     WakelockPlus.disable();

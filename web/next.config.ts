@@ -7,6 +7,10 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 const nextConfig: NextConfig = {
+  // TODO: re-enable image optimization once free transformation quota resets
+  images: {
+    unoptimized: true,
+  },
   typedRoutes: true,
   reactCompiler: true,
   logging: {

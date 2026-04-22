@@ -5,6 +5,7 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:frosty/apis/twitch_api.dart';
 import 'package:frosty/constants.dart';
 import 'package:frosty/models/irc.dart';
+import 'package:frosty/models/user.dart';
 import 'package:frosty/screens/channel/chat/stores/chat_store.dart';
 import 'package:frosty/screens/channel/chat/widgets/chat_user_modal.dart';
 import 'package:frosty/screens/channel/chat/widgets/reply_thread.dart';
@@ -19,6 +20,20 @@ class ChatMessage extends StatelessWidget {
   final bool showReplyHeader;
   final bool isInReplyThread;
 
+  /// Override for merged chat view — provides combined channel profiles.
+  final Map<String, UserTwitch>? overrideChannelIdToUserTwitch;
+
+  /// Override for merged chat view — sets the active/send-target channel ID.
+  final String? overrideCurrentChannelId;
+
+  /// In merged mode, the active tab's ChatStore for notifications and emote
+  /// menu. Composer actions (reply/paste) use [onActivateSourceTab] to switch
+  /// to the source tab first, then operate on [chatStore] directly.
+  final ChatStore? inputChatStore;
+
+  /// In merged mode, switches the active tab to this message's source channel.
+  final VoidCallback? onActivateSourceTab;
+
   const ChatMessage({
     super.key,
     required this.ircMessage,
@@ -26,6 +41,10 @@ class ChatMessage extends StatelessWidget {
     this.isModal = false,
     this.showReplyHeader = true,
     this.isInReplyThread = false,
+    this.overrideChannelIdToUserTwitch,
+    this.overrideCurrentChannelId,
+    this.inputChatStore,
+    this.onActivateSourceTab,
   });
 
   void onTapName(BuildContext context) {
@@ -71,10 +90,13 @@ class ChatMessage extends StatelessWidget {
     });
   }
 
+  /// The store to use for notifications and emote menu in merged mode.
+  ChatStore get _effectiveInputStore => inputChatStore ?? chatStore;
+
   Future<void> copyMessage() async {
     await Clipboard.setData(ClipboardData(text: ircMessage.message ?? ''));
 
-    chatStore.updateNotification('Message copied');
+    _effectiveInputStore.updateNotification('Message copied');
   }
 
   void onLongPressMessage(BuildContext context, TextStyle defaultTextStyle) {
@@ -104,9 +126,10 @@ class ChatMessage extends StatelessWidget {
                   badgeScale: chatStore.settings.badgeScale,
                   launchExternal: chatStore.settings.launchUrlExternal,
                   timestamp: chatStore.settings.timestampType,
-                  channelIdToUserTwitch:
+                  channelIdToUserTwitch: overrideChannelIdToUserTwitch ??
                       chatStore.assetsStore.channelIdToUserTwitch,
-                  currentChannelId: chatStore.channelId,
+                  currentChannelId:
+                      overrideCurrentChannelId ?? chatStore.channelId,
                 ),
                 style: defaultTextStyle,
               ),
@@ -125,19 +148,24 @@ class ChatMessage extends StatelessWidget {
             onTap: () async {
               await copyMessage();
 
+              final effectiveChatDelay = chatStore.settings.effectiveChatDelay;
+
               final hasChatDelay =
-                  chatStore.settings.showVideo &&
-                  chatStore.settings.chatDelay > 0;
+                  chatStore.settings.showVideo && effectiveChatDelay > 0;
 
               if (hasChatDelay) {
-                chatStore.updateNotification(
-                  'Chatting is disabled due to message delay (${chatStore.settings.chatDelay.toInt()}s)',
+                _effectiveInputStore.updateNotification(
+                  'Chatting is disabled due to message delay (${effectiveChatDelay.toInt()}s)',
                 );
                 if (context.mounted) {
                   Navigator.pop(context);
                 }
                 return;
               }
+
+              // In merged mode, switch to the source tab so the paste
+              // targets the correct channel's composer.
+              onActivateSourceTab?.call();
 
               // Paste the copied message into the text controller
               chatStore.textController.text = ircMessage.message ?? '';
@@ -151,6 +179,11 @@ class ChatMessage extends StatelessWidget {
           ),
           ListTile(
             onTap: () {
+              // In merged mode, switch to the source tab so the reply
+              // targets the correct channel (reply-parent-msg-id is
+              // channel-scoped).
+              onActivateSourceTab?.call();
+
               chatStore.replyingToMessage = ircMessage;
               chatStore.safeRequestFocus();
               Navigator.pop(context);
@@ -201,9 +234,10 @@ class ChatMessage extends StatelessWidget {
                   badgeScale: chatStore.settings.badgeScale,
                   launchExternal: chatStore.settings.launchUrlExternal,
                   timestamp: chatStore.settings.timestampType,
-                  channelIdToUserTwitch:
+                  channelIdToUserTwitch: overrideChannelIdToUserTwitch ??
                       chatStore.assetsStore.channelIdToUserTwitch,
-                  currentChannelId: chatStore.channelId,
+                  currentChannelId:
+                      overrideCurrentChannelId ?? chatStore.channelId,
                 ),
               ),
             );
@@ -281,6 +315,9 @@ class ChatMessage extends StatelessWidget {
             if (ircMessage.mention == true) highlightColor = context.colorScheme.error;
             if (chatStore.highlightedUsers.contains(ircMessage.user)) highlightColor = context.colorScheme.primary;
 
+            if (ircMessage.mention == true) {
+              highlightColor = context.colorScheme.error;
+            }
 
             if (messageHeader != null) {
               renderMessage = Column(
@@ -356,8 +393,10 @@ class ChatMessage extends StatelessWidget {
                         launchExternal: chatStore.settings.launchUrlExternal,
                         timestamp: chatStore.settings.timestampType,
                         channelIdToUserTwitch:
-                            chatStore.assetsStore.channelIdToUserTwitch,
-                        currentChannelId: chatStore.channelId,
+                            overrideChannelIdToUserTwitch ??
+                                chatStore.assetsStore.channelIdToUserTwitch,
+                        currentChannelId:
+                            overrideCurrentChannelId ?? chatStore.channelId,
                       ),
                     ),
                   ),
@@ -479,8 +518,10 @@ class ChatMessage extends StatelessWidget {
                           launchExternal: chatStore.settings.launchUrlExternal,
                           timestamp: chatStore.settings.timestampType,
                           channelIdToUserTwitch:
-                              chatStore.assetsStore.channelIdToUserTwitch,
-                          currentChannelId: chatStore.channelId,
+                              overrideChannelIdToUserTwitch ??
+                                  chatStore.assetsStore.channelIdToUserTwitch,
+                          currentChannelId:
+                              overrideCurrentChannelId ?? chatStore.channelId,
                         ),
                       ),
                     ),
@@ -554,8 +595,8 @@ class ChatMessage extends StatelessWidget {
         final finalMessage = InkWell(
           onTap: () {
             FocusScope.of(context).unfocus();
-            if (chatStore.assetsStore.showEmoteMenu) {
-              chatStore.assetsStore.showEmoteMenu = false;
+            if (_effectiveInputStore.assetsStore.showEmoteMenu) {
+              _effectiveInputStore.assetsStore.showEmoteMenu = false;
             }
           },
           onLongPress: () => onLongPressMessage(context, defaultTextStyle),

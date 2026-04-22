@@ -136,6 +136,24 @@ class FrostyThemes {
         backgroundColor: backgroundColor,
         surfaceTintColor: backgroundColor,
       ),
+      menuTheme: MenuThemeData(
+        style: MenuStyle(
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(vertical: 4),
+          ),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: const BorderRadius.all(Radius.circular(12)),
+              side: BorderSide(color: borderColor),
+            ),
+          ),
+        ),
+      ),
+      menuButtonTheme: MenuButtonThemeData(
+        style: MenuItemButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+        ),
+      ),
       dialogTheme: DialogThemeData(
         backgroundColor: backgroundColor,
         surfaceTintColor: backgroundColor,

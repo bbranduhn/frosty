@@ -75,6 +75,7 @@ class LargeStreamCard extends StatelessWidget {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
+          settings: const RouteSettings(name: VideoChat.routeName),
           builder: (context) => VideoChat(
             userId: streamInfo.userId,
             userName: streamInfo.userName,

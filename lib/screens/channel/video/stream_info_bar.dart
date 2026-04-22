@@ -202,6 +202,7 @@ class StreamInfoBar extends StatelessWidget {
                                         Navigator.push(
                                           context,
                                           MaterialPageRoute(
+                                            settings: const RouteSettings(name: CategoryStreams.routeName),
                                             builder: (context) =>
                                                 CategoryStreams(
                                                   categoryId:
@@ -293,6 +294,7 @@ class StreamInfoBar extends StatelessWidget {
                                       onDoubleTap: () => Navigator.push(
                                         context,
                                         MaterialPageRoute(
+                                          settings: const RouteSettings(name: CategoryStreams.routeName),
                                           builder: (context) => CategoryStreams(
                                             categoryId:
                                                 streamInfo?.gameId ?? '',

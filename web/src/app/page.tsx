@@ -161,7 +161,13 @@ function PhoneMedia({
           className='size-full object-contain'
         />
       ) : (
-        <Image src={media.src} alt={title} fill className='object-contain' />
+        <Image
+            src={media.src}
+            alt={title}
+            fill
+            sizes='(min-width: 768px) 352px, 240px'
+            className='object-contain'
+          />
       )}
     </div>
   )

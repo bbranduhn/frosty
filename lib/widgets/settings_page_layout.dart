@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:frosty/utils/context_extensions.dart';
-import 'package:frosty/widgets/animated_scroll_border.dart';
 import 'package:frosty/widgets/frosty_scrollbar.dart';
 
 /// A reusable layout for settings pages that handles common functionality:
 /// - Orientation detection
 /// - Responsive padding calculations
-/// - AnimatedScrollBorder positioning
 /// - ScrollController management
 class SettingsPageLayout extends StatefulWidget {
   final List<Widget> children;
@@ -59,12 +57,6 @@ class _SettingsPageLayoutState extends State<SettingsPageLayout> {
                 : listPadding,
             children: widget.children,
           ),
-        ),
-        Positioned(
-          top: borderTop.toDouble(),
-          left: 0,
-          right: 0,
-          child: AnimatedScrollBorder(scrollController: _scrollController),
         ),
       ],
     );

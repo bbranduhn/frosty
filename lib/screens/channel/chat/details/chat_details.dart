@@ -416,6 +416,7 @@ class _ChatDetailsState extends State<ChatDetails> {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
+                settings: const RouteSettings(name: Settings.routeName),
                 builder: (context) =>
                     Settings(settingsStore: widget.chatStore.settings),
               ),

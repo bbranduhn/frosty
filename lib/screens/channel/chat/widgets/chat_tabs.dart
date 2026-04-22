@@ -7,7 +7,6 @@ import 'package:frosty/screens/channel/chat/chat.dart';
 import 'package:frosty/screens/channel/chat/stores/chat_tabs_store.dart';
 import 'package:frosty/screens/channel/chat/widgets/add_chat_dialog.dart';
 import 'package:frosty/utils.dart';
-import 'package:frosty/widgets/frosty_dialog.dart';
 import 'package:frosty/widgets/profile_picture.dart';
 
 /// Widget that displays multiple chat tabs with a tab bar.
@@ -57,6 +56,8 @@ class ChatTabs extends StatelessWidget {
         final tabs = chatTabsStore.tabs;
         final activeIndex = chatTabsStore.activeTabIndex;
         final showTabBar = chatTabsStore.showTabBar;
+        final showMerge =
+            tabs.where((t) => t.isActivated).length >= 2;
 
         // Calculate extra top padding for tab bar when visible
         final tabBarHeight = showTabBar ? 48.0 : 0.0;
@@ -94,23 +95,30 @@ class ChatTabs extends StatelessWidget {
           },
           child: Stack(
             children: [
-              // Chat content with IndexedStack to preserve state
+              // Chat content: merged view or IndexedStack
               Positioned.fill(
-                child: IndexedStack(
-                  index: activeIndex,
-                  children: tabs.map((tabInfo) {
-                    // Show placeholder for non-activated tabs
-                    if (tabInfo.chatStore == null) {
-                      return const SizedBox.shrink();
-                    }
-                    return Chat(
-                      key: ValueKey(tabInfo.channelId),
-                      chatStore: tabInfo.chatStore!,
-                      listPadding: adjustedPadding,
-                      onAddChat: () => _handleAddChat(context),
-                    );
-                  }).toList(),
-                ),
+                child: chatTabsStore.mergedMode
+                    ? Chat(
+                        chatStore: chatTabsStore.activeChatStore,
+                        chatTabsStore: chatTabsStore,
+                        listPadding: adjustedPadding,
+                        onAddChat: () => _handleAddChat(context),
+                      )
+                    : IndexedStack(
+                        index: activeIndex,
+                        children: tabs.map((tabInfo) {
+                          // Show placeholder for non-activated tabs
+                          if (tabInfo.chatStore == null) {
+                            return const SizedBox.shrink();
+                          }
+                          return Chat(
+                            key: ValueKey(tabInfo.channelId),
+                            chatStore: tabInfo.chatStore!,
+                            listPadding: adjustedPadding,
+                            onAddChat: () => _handleAddChat(context),
+                          );
+                        }).toList(),
+                      ),
               ),
               // Tab bar (only visible when more than 1 tab)
               if (showTabBar)
@@ -120,30 +128,52 @@ class ChatTabs extends StatelessWidget {
                   right: 0,
                   child: SizedBox(
                     height: 48,
-                    child: ReorderableListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: tabs.length,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      onReorder: (oldIndex, newIndex) {
-                        HapticFeedback.lightImpact();
-                        chatTabsStore.reorderTab(oldIndex, newIndex);
-                      },
-                      proxyDecorator: (child, index, animation) {
-                        return Material(
-                          color: Colors.transparent,
-                          child: child,
-                        );
-                      },
-                      itemBuilder: (context, index) {
-                        final tabInfo = chatTabsStore.tabs[index];
-                        return Padding(
-                          key: ValueKey(tabInfo.channelId),
-                          padding: EdgeInsets.only(
-                            right: index < tabs.length - 1 ? 4 : 0,
+                    child: Stack(
+                      children: [
+                        // When merge button is visible, clips at its center
+                        // so chips slide under its left half then disappear.
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          right: showMerge ? 33 : 0,
+                          child: ReorderableListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: tabs.length,
+                            padding: EdgeInsets.only(
+                              left: 12,
+                              right: showMerge ? 32 : 12,
+                            ),
+                            onReorder: (oldIndex, newIndex) {
+                              HapticFeedback.lightImpact();
+                              chatTabsStore.reorderTab(oldIndex, newIndex);
+                            },
+                            proxyDecorator: (child, index, animation) {
+                              return Material(
+                                color: Colors.transparent,
+                                child: child,
+                              );
+                            },
+                            itemBuilder: (context, index) {
+                              final tabInfo = chatTabsStore.tabs[index];
+                              return Padding(
+                                key: ValueKey(tabInfo.channelId),
+                                padding: EdgeInsets.only(
+                                  right: index < tabs.length - 1 ? 4 : 0,
+                                ),
+                                child: _buildTab(context, index),
+                              );
+                            },
                           ),
-                          child: _buildTab(context, index),
-                        );
-                      },
+                        ),
+                        if (showMerge)
+                          Positioned(
+                            right: 12,
+                            top: 0,
+                            bottom: 0,
+                            child: Center(child: _buildMergeToggle(context)),
+                          ),
+                      ],
                     ),
                   ),
                 ),
@@ -154,33 +184,24 @@ class ChatTabs extends StatelessWidget {
     );
   }
 
-  Future<void> _confirmRemoveTab(
-    BuildContext context,
-    int index,
-    String displayName,
-  ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => FrostyDialog(
-        title: 'Remove $displayName',
-        message: "Are you sure you want to remove $displayName's chat tab?",
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
-          ),
-        ],
+  Widget _buildMergeToggle(BuildContext context) {
+    final isMerged = chatTabsStore.mergedMode;
+    return IconButton.filledTonal(
+      icon: const Icon(Icons.call_merge, size: 18),
+      tooltip: isMerged ? 'Split chats' : 'Merge loaded chats',
+      visualDensity: VisualDensity.compact,
+      isSelected: isMerged,
+      style: IconButton.styleFrom(
+        minimumSize: const Size(42, 42),
+        backgroundColor: isMerged
+            ? null
+            : Theme.of(context).colorScheme.surfaceContainerHighest,
       ),
+      onPressed: () {
+        HapticFeedback.selectionClick();
+        chatTabsStore.toggleMergedMode();
+      },
     );
-
-    if (confirmed == true) {
-      HapticFeedback.lightImpact();
-      chatTabsStore.removeTab(index);
-    }
   }
 
   Widget _buildTab(BuildContext context, int index) {
@@ -194,32 +215,78 @@ class ChatTabs extends StatelessWidget {
 
     final avatar = ProfilePicture(userLogin: tabInfo.channelLogin, radius: 12);
 
-    return InputChip(
-      avatar: isActivated ? avatar : Opacity(opacity: 0.5, child: avatar),
-      label: Text(
-        displayName,
-        style: isActivated
-            ? null
-            : TextStyle(
-                color: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
-              ),
-      ),
-      selected: isActive,
-      showCheckmark: false,
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      onPressed: () {
-        if (!isActive) {
-          HapticFeedback.selectionClick();
-          chatTabsStore.setActiveTab(index);
-        }
+    if (tabInfo.isPrimary) {
+      return InputChip(
+        avatar: avatar,
+        label: Text(displayName),
+        selected: isActive,
+        showCheckmark: false,
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        onPressed: () {
+          if (!isActive) {
+            HapticFeedback.selectionClick();
+            chatTabsStore.setActiveTab(index);
+          }
+        },
+      );
+    }
+
+    return MenuAnchor(
+      menuChildren: [
+        if (isActivated)
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.power_off_rounded, size: 18),
+            child: const Text('Disconnect'),
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              chatTabsStore.deactivateTab(index);
+            },
+          ),
+        MenuItemButton(
+          leadingIcon: Icon(
+            Icons.delete_outline_rounded,
+            size: 18,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          child: Text(
+            'Remove',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+          onPressed: () {
+            HapticFeedback.lightImpact();
+            chatTabsStore.removeTab(index);
+          },
+        ),
+      ],
+      builder: (context, controller, child) {
+        return InputChip(
+          avatar:
+              isActivated ? avatar : Opacity(opacity: 0.5, child: avatar),
+          label: Text(
+            displayName,
+            style: isActivated
+                ? null
+                : TextStyle(
+                    color: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
+                  ),
+          ),
+          selected: isActive,
+          showCheckmark: false,
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          onPressed: () {
+            if (!isActive) {
+              HapticFeedback.selectionClick();
+              chatTabsStore.setActiveTab(index);
+            }
+          },
+          onDeleted: () => controller.open(),
+          deleteButtonTooltipMessage: 'Tab options',
+        );
       },
-      onDeleted: tabInfo.isPrimary
-          ? null
-          : () => _confirmRemoveTab(context, index, displayName),
-      deleteButtonTooltipMessage: 'Close chat',
     );
   }
 }
