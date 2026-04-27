@@ -66,6 +66,7 @@ abstract class _SettingsStoreBase with Store {
   static const defaultDefaultToHighestQuality = false;
   static const defaultUseTextureRendering = true;
   static const defaultKeepScreenAwake = true;
+  static const defaultRequestAudioFocus = true;
 
   // Overlay defaults
   static const defaultShowOverlay = true;
@@ -88,6 +89,10 @@ abstract class _SettingsStoreBase with Store {
   @JsonKey(defaultValue: defaultKeepScreenAwake)
   @observable
   var keepScreenAwake = defaultKeepScreenAwake;
+  
+  @JsonKey(defaultValue: defaultRequestAudioFocus)
+  @observable
+  var requestAudioFocus = defaultRequestAudioFocus;
 
   // Overlay options
   @JsonKey(defaultValue: defaultShowOverlay)
@@ -108,6 +113,8 @@ abstract class _SettingsStoreBase with Store {
     defaultToHighestQuality = defaultDefaultToHighestQuality;
     useTextureRendering = defaultUseTextureRendering;
     keepScreenAwake = defaultKeepScreenAwake;
+
+    requestAudioFocus = defaultRequestAudioFocus;
 
     showOverlay = defaultShowOverlay;
     toggleableOverlay = defaultToggleableOverlay;
