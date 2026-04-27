@@ -49,6 +49,16 @@ class VideoSettings extends StatelessWidget {
             value: settingsStore.keepScreenAwake,
             onChanged: (newValue) => settingsStore.keepScreenAwake = newValue,
           ),
+          if (Platform.isAndroid)
+            SettingsListSwitch(
+              title: 'Request audio focus',
+              subtitle: const Text(
+                'If disabled, other apps can play audio simultaneously while watching a stream.',
+              ),
+              value: settingsStore.requestAudioFocus,
+              onChanged: (newValue) =>
+                  settingsStore.requestAudioFocus = newValue,
+            ),
           const SectionHeader('Overlay'),
           SettingsListSwitch(
             title: 'Use custom video overlay',
